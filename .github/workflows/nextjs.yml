@@ -1,0 +1,159 @@
+name: Next.js CI/CD
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: "Docker image name (e.g. school-management-front)"
+        required: true
+        type: string
+      node-version:
+        description: "Node.js version"
+        default: "20"
+        type: string
+      package-manager:
+        description: "Package manager (pnpm or npm)"
+        default: "pnpm"
+        type: string
+      main-branch:
+        description: "Main branch name"
+        default: "master"
+        type: string
+    secrets:
+      VPS_HOST:
+        required: true
+      VPS_USERNAME:
+        required: true
+      VPS_SSH_KEY:
+        required: true
+      VPS_PORT:
+        required: true
+      DEPLOY_PATH:
+        required: true
+      ENV_FILE_BASE64:
+        required: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: Lint
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm run lint
+          else
+            npm run lint
+          fi
+
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    needs: [lint]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    environment: ${{ github.ref_name == inputs.main-branch && 'production' || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tag
+        run: |
+          if [ "${{ github.ref_name }}" = "${{ inputs.main-branch }}" ]; then
+            echo "IMAGE_TAG=prod" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=staging" >> $GITHUB_ENV
+          fi
+
+      - name: Extract NEXT_PUBLIC vars from env secret
+        run: |
+          echo '${{ secrets.ENV_FILE_BASE64 }}' | base64 -d > /tmp/.env
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^NEXT_PUBLIC_ ]]; then
+              echo "$line" >> $GITHUB_ENV
+            fi
+          done < /tmp/.env
+          rm /tmp/.env
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ env.NEXT_PUBLIC_API_URL }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}-buildcache,mode=max
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          format: table
+
+      - name: Prepare env file
+        run: |
+          echo '${{ secrets.ENV_FILE_BASE64 }}' | base64 -d > deploy/.env
+          chmod 600 deploy/.env
+
+      - name: Copy deployment files to VPS
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: "deploy/*"
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 1
+          overwrite: true
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            chmod +x deploy.sh
+            IMAGE_TAG=${{ env.IMAGE_TAG }} ./deploy.sh
