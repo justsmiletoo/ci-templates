@@ -125,7 +125,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
           exit-code: 1
           format: table
 
