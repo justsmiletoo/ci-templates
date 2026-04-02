@@ -21,17 +21,17 @@ on:
         type: string
     secrets:
       VPS_HOST:
-        required: true
+        required: false
       VPS_USERNAME:
-        required: true
+        required: false
       VPS_SSH_KEY:
-        required: true
+        required: false
       VPS_PORT:
-        required: true
+        required: false
       DEPLOY_PATH:
-        required: true
+        required: false
       ENV_FILE_BASE64:
-        required: true
+        required: false
 
 jobs:
   lint:
