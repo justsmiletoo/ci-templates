@@ -50,9 +50,9 @@ on:
         required: false
 
 jobs:
-  # ── Quality ──────────────────────────────────────────────
-  quality:
-    name: Quality
+  # ── Lint ─────────────────────────────────────────────────
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,12 +87,66 @@ jobs:
             npm run lint
           fi
 
+  # ── Type Check ───────────────────────────────────────────
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: Prepare
+        if: ${{ inputs.prepare-command != '' }}
+        run: ${{ inputs.prepare-command }}
+
       - name: Type Check
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm run check
           else
             npm run check
+          fi
+
+  # ── Security Audit ───────────────────────────────────────
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
           fi
 
       - name: Security Audit
@@ -107,7 +161,7 @@ jobs:
   release-please:
     name: Release Please
     runs-on: ubuntu-latest
-    needs: [quality]
+    needs: [lint, type-check, audit]
     if: >-
       inputs.has-release-please &&
       github.event_name == 'push' && (
@@ -128,7 +182,7 @@ jobs:
   build-and-deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    needs: [quality, release-please]
+    needs: [lint, type-check, audit, release-please]
     if: >-
       always() && !failure() && !cancelled() &&
       github.event_name == 'push' && (
