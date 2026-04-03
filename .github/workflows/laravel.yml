@@ -27,8 +27,16 @@ on:
         description: "Main branch name"
         default: "master"
         type: string
+      staging-branch:
+        description: "Staging branch name (e.g. re7). Leave empty for solo stage"
+        default: ""
+        type: string
+      release-type:
+        description: "Release type for release-please (php, node, etc.)"
+        default: "php"
+        type: string
       test-runner:
-        description: "Test runner command (pest or phpunit)"
+        description: "Test runner command"
         default: "vendor/bin/pest"
         type: string
     secrets:
@@ -46,6 +54,7 @@ on:
         required: false
 
 jobs:
+  # ── Checks ─────────────────────────────────────────────
   security:
     name: Security Vulnerabilities
     runs-on: ubuntu-latest
@@ -153,11 +162,45 @@ jobs:
       - name: Run tests
         run: ${{ inputs.test-runner }}
 
+  # ── Release Please ─────────────────────────────────────
+  # Multi-stage: runs on staging-branch (e.g. re7)
+  # Solo stage:  runs on main-branch (e.g. master)
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    needs: [security, quality, phpstan, tests]
+    if: >-
+      github.event_name == 'push' && (
+        (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch) ||
+        (inputs.staging-branch == '' && github.ref_name == inputs.main-branch)
+      )
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: ${{ inputs.release-type }}
+          target-branch: ${{ inputs.staging-branch != '' && inputs.staging-branch || inputs.main-branch }}
+
+  # ── Build and Deploy ───────────────────────────────────
+  # Multi-stage:
+  #   - staging-branch + release created → deploy staging
+  #   - main-branch (merge from staging) → deploy prod
+  # Solo stage:
+  #   - main-branch + release created → deploy prod
   build-and-deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    needs: [security, quality, phpstan, tests]
-    if: github.event_name == 'push'
+    needs: [security, quality, phpstan, tests, release-please]
+    if: >-
+      always() && !failure() && !cancelled() &&
+      github.event_name == 'push' && (
+        (inputs.staging-branch != '' && github.ref_name == inputs.main-branch) ||
+        (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch && needs.release-please.outputs.release_created == 'true') ||
+        (inputs.staging-branch == '' && github.ref_name == inputs.main-branch && needs.release-please.outputs.release_created == 'true')
+      )
     permissions:
       contents: read
       packages: write
