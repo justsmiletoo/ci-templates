@@ -65,7 +65,23 @@ jobs:
       - name: ECS - Code Style
         run: vendor/bin/ecs check
 
-      - name: PHPStan - Static Analysis
+  # ── PHPStan ──────────────────────────────────────────────
+  phpstan:
+    name: PHPStan Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php-version }}
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run PHPStan
         run: vendor/bin/phpstan analyse
 
   # ── Security Audit ───────────────────────────────────────
@@ -91,7 +107,7 @@ jobs:
   release-please:
     name: Release Please
     runs-on: ubuntu-latest
-    needs: [quality, security]
+    needs: [quality, phpstan, security]
     if: >-
       inputs.has-release-please &&
       github.event_name == 'push' && (
@@ -112,7 +128,7 @@ jobs:
   build-and-deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    needs: [quality, security, release-please]
+    needs: [quality, phpstan, security, release-please]
     if: >-
       always() && !failure() && !cancelled() &&
       github.event_name == 'push' && (
