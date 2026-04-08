@@ -104,11 +104,11 @@ jobs:
 
       - name: Check frontend formatting
         if: ${{ inputs.has-node }}
-        run: npm run format:check || true
+        run: npm run format:check
 
       - name: Lint frontend
         if: ${{ inputs.has-node }}
-        run: npm run lint || true
+        run: npm run lint
 
   phpstan:
     name: PHPStan Analysis
