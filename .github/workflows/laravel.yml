@@ -248,7 +248,7 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ inputs.php-image }}:${{ env.IMAGE_TAG }}
             ghcr.io/${{ github.repository_owner }}/${{ inputs.php-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.php-image }}:${{ env.IMAGE_TAG }}-buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.php-image }}:${{ env.IMAGE_TAG }}-buildcache,mode=max
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.php-image }}:${{ env.IMAGE_TAG }}-buildcache,mode=min
 
       - name: Build and push Nginx image
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
@@ -262,7 +262,7 @@ jobs:
           build-args: |
             PHP_IMAGE=ghcr.io/${{ github.repository_owner }}/${{ inputs.php-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-buildcache,mode=max
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-buildcache,mode=min
 
       - name: Scan PHP image for vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
