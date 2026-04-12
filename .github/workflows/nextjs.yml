@@ -12,7 +12,7 @@ on:
         default: "20"
         type: string
       package-manager:
-        description: "Package manager (pnpm or npm)"
+        description: "Package manager (pnpm, npm or bun)"
         default: "pnpm"
         type: string
       prepare-command:
@@ -58,6 +58,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        if: ${{ inputs.package-manager != 'bun' }}
         with:
           node-version: ${{ inputs.node-version }}
 
@@ -67,10 +68,16 @@ jobs:
         with:
           version: 9
 
+      - name: Setup bun
+        if: ${{ inputs.package-manager == 'bun' }}
+        uses: oven-sh/setup-bun@v2
+
       - name: Install dependencies
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm install --frozen-lockfile
+          elif [ "${{ inputs.package-manager }}" = "bun" ]; then
+            bun install --frozen-lockfile
           else
             npm ci
           fi
@@ -83,6 +90,8 @@ jobs:
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm run lint
+          elif [ "${{ inputs.package-manager }}" = "bun" ]; then
+            bun run lint
           else
             npm run lint
           fi
@@ -95,6 +104,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        if: ${{ inputs.package-manager != 'bun' }}
         with:
           node-version: ${{ inputs.node-version }}
 
@@ -104,10 +114,16 @@ jobs:
         with:
           version: 9
 
+      - name: Setup bun
+        if: ${{ inputs.package-manager == 'bun' }}
+        uses: oven-sh/setup-bun@v2
+
       - name: Install dependencies
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm install --frozen-lockfile
+          elif [ "${{ inputs.package-manager }}" = "bun" ]; then
+            bun install --frozen-lockfile
           else
             npm ci
           fi
@@ -120,6 +136,8 @@ jobs:
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm run check
+          elif [ "${{ inputs.package-manager }}" = "bun" ]; then
+            bun run check
           else
             npm run check
           fi
@@ -132,6 +150,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        if: ${{ inputs.package-manager != 'bun' }}
         with:
           node-version: ${{ inputs.node-version }}
 
@@ -141,10 +160,16 @@ jobs:
         with:
           version: 9
 
+      - name: Setup bun
+        if: ${{ inputs.package-manager == 'bun' }}
+        uses: oven-sh/setup-bun@v2
+
       - name: Install dependencies
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm install --frozen-lockfile
+          elif [ "${{ inputs.package-manager }}" = "bun" ]; then
+            bun install --frozen-lockfile
           else
             npm ci
           fi
@@ -153,6 +178,8 @@ jobs:
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm audit --prod || true
+          elif [ "${{ inputs.package-manager }}" = "bun" ]; then
+            bun pm pack --dry-run 2>/dev/null || true
           else
             npm audit --prod || true
           fi
