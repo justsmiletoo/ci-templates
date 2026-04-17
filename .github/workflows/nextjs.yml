@@ -311,7 +311,7 @@ jobs:
           ssh-keyscan -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
 
       - name: Copy deployment files to VPS
-        run: rsync -az -e "ssh -p ${{ secrets.VPS_PORT }}" deploy/ ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:${{ secrets.DEPLOY_PATH }}/
+        run: rsync -az --mkpath -e "ssh -p ${{ secrets.VPS_PORT }}" deploy/ ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:${{ secrets.DEPLOY_PATH }}/
 
       - name: Deploy to VPS
         run: ssh -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} "cd ${{ secrets.DEPLOY_PATH }} && chmod +x deploy.sh && IMAGE_TAG=${{ env.IMAGE_TAG }} ./deploy.sh"
