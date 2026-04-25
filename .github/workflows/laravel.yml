@@ -43,6 +43,10 @@ on:
         description: "Test runner command"
         default: "vendor/bin/pest"
         type: string
+      runner:
+        description: "Runner label (ubuntu-latest for cloud, self-hosted for kvm4)"
+        default: "ubuntu-latest"
+        type: string
     secrets:
       VPS_HOST:
         required: false
@@ -61,7 +65,7 @@ jobs:
   # ── Checks ─────────────────────────────────────────────
   security:
     name: Security Vulnerabilities
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -76,7 +80,7 @@ jobs:
 
   quality:
     name: Code Quality
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -112,7 +116,7 @@ jobs:
 
   phpstan:
     name: PHPStan Analysis
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -130,7 +134,7 @@ jobs:
 
   tests:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -171,7 +175,7 @@ jobs:
   # Solo stage:  runs on main-branch (e.g. master)
   release-please:
     name: Release Please
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     needs: [security, quality, phpstan, tests]
     if: >-
       inputs.has-release-please &&
@@ -192,7 +196,7 @@ jobs:
   # ── Build ───────────────────────────────────────────────
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     needs: [security, quality, phpstan, tests, release-please]
     if: >-
       always() && !failure() && !cancelled() &&
@@ -269,7 +273,7 @@ jobs:
   # ── Deploy ─────────────────────────────────────────────
   deploy:
     name: Deploy
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     needs: [build]
     if: always() && needs.build.result == 'success'
     environment: ${{ github.ref_name == inputs.main-branch && 'production' || 'staging' }}
