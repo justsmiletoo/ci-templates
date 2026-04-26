@@ -35,6 +35,11 @@ on:
         description: "Release type for release-please"
         default: "node"
         type: string
+      runner:
+        description: "Runner label (ubuntu-latest for cloud, self-hosted for kvm4)"
+        default: "self-hosted"
+        # default: "ubuntu-latest"   # toggle to use cloud (uncomment this, comment line above)
+        type: string
     secrets:
       VPS_HOST:
         required: false
@@ -53,7 +58,7 @@ jobs:
   # ── Lint ─────────────────────────────────────────────────
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -99,7 +104,7 @@ jobs:
   # ── Type Check ───────────────────────────────────────────
   type-check:
     name: Type Check
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -145,7 +150,7 @@ jobs:
   # ── Security Audit ───────────────────────────────────────
   audit:
     name: Security Audit
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -187,7 +192,7 @@ jobs:
   # ── Release Please (solo apps only) ────────────────────
   release-please:
     name: Release Please
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     needs: [lint, type-check, audit]
     if: >-
       inputs.has-release-please &&
@@ -208,7 +213,7 @@ jobs:
   # ── Build ───────────────────────────────────────────────
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     needs: [lint, type-check, audit, release-please]
     if: >-
       always() && !failure() && !cancelled() &&
@@ -283,7 +288,7 @@ jobs:
   # ── Deploy ─────────────────────────────────────────────
   deploy:
     name: Deploy
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     needs: [build]
     if: always() && needs.build.result == 'success'
     environment: ${{ github.ref_name == inputs.main-branch && 'production' || 'staging' }}
