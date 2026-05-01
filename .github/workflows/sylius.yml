@@ -33,8 +33,8 @@ on:
         type: string
       runner:
         description: "Runner label (ubuntu-latest for cloud, self-hosted for kvm4)"
-        default: "self-hosted"
-        # default: "ubuntu-latest"   # toggle to use cloud (uncomment this, comment line above)
+        default: "ubuntu-latest"
+        # default: "self-hosted"   # toggle to use kvm4 (uncomment this, comment line above)
         type: string
     secrets:
       VPS_HOST:
