@@ -218,8 +218,9 @@ jobs:
   build:
     name: Build
     runs-on: ${{ inputs.runner }}
-    needs: [lint, type-check, audit]
+    needs: [lint, type-check, tests, audit]
     if: >-
+      always() && !failure() && !cancelled() &&
       github.event_name == 'push' && (
         github.ref_name == inputs.main-branch ||
         (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch)
