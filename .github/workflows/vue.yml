@@ -39,14 +39,6 @@ on:
         description: "Staging branch name (e.g. develop). Leave empty for solo stage"
         default: ""
         type: string
-      has-release-please:
-        description: "Enable release-please"
-        default: false
-        type: boolean
-      release-type:
-        description: "Release type for release-please"
-        default: "node"
-        type: string
       runner:
         description: "Runner label (ubuntu-latest for cloud, self-hosted for kvm4)"
         default: "ubuntu-latest"
@@ -222,44 +214,15 @@ jobs:
             npm audit --omit=dev --audit-level=high || true
           fi
 
-  # ── Release Please ─────────────────────────────────────
-  release-please:
-    name: Release Please
-    runs-on: ${{ inputs.runner }}
-    needs: [lint, type-check, audit]
-    if: >-
-      inputs.has-release-please &&
-      github.event_name == 'push' && (
-        (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch) ||
-        (inputs.staging-branch == '' && github.ref_name == inputs.main-branch)
-      )
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        id: release
-        with:
-          release-type: ${{ inputs.release-type }}
-          target-branch: ${{ inputs.staging-branch != '' && inputs.staging-branch || inputs.main-branch }}
-
   # ── Build ───────────────────────────────────────────────
   build:
     name: Build
     runs-on: ${{ inputs.runner }}
-    needs: [lint, type-check, audit, release-please]
+    needs: [lint, type-check, audit]
     if: >-
-      always() && !failure() && !cancelled() &&
       github.event_name == 'push' && (
-        (inputs.has-release-please == false && (
-          github.ref_name == inputs.main-branch ||
-          (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch)
-        )) ||
-        (inputs.has-release-please && (
-          (inputs.staging-branch != '' && github.ref_name == inputs.main-branch) ||
-          (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch && needs.release-please.outputs.release_created == 'true') ||
-          (inputs.staging-branch == '' && github.ref_name == inputs.main-branch && needs.release-please.outputs.release_created == 'true')
-        ))
+        github.ref_name == inputs.main-branch ||
+        (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch)
       )
     permissions:
       contents: read
