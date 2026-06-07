@@ -50,6 +50,10 @@ on:
       ENV_FILE_BASE64:
         required: false
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'master' && github.ref_name != 'main' }}
+
 jobs:
   # ── Code Quality ─────────────────────────────────────────
   quality:
@@ -162,6 +166,33 @@ jobs:
             echo "IMAGE_TAG=staging" >> $GITHUB_ENV
           fi
 
+      - name: Lint PHP Dockerfile
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: docker/php/Dockerfile
+          failure-threshold: error
+
+      - name: Lint Nginx Dockerfile
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: docker/nginx/Dockerfile
+          failure-threshold: error
+
+      - name: Detect nginx-affecting changes
+        id: nginx-filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            nginx:
+              - 'docker/nginx/**'
+              - 'public/build/**'
+              - 'public/assets/**'
+              - 'public/media/**'
+              - 'assets/**'
+              - 'package*.json'
+              - 'webpack.config.*'
+              - 'gulpfile.*'
+
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
@@ -185,6 +216,7 @@ jobs:
           cache-to: type=gha,scope=${{ inputs.php-image }}-${{ env.IMAGE_TAG }},mode=max
 
       - name: Build and push Nginx image
+        if: steps.nginx-filter.outputs.nginx == 'true'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
@@ -198,10 +230,26 @@ jobs:
           cache-from: type=gha,scope=${{ inputs.nginx-image }}-${{ env.IMAGE_TAG }}
           cache-to: type=gha,scope=${{ inputs.nginx-image }}-${{ env.IMAGE_TAG }},mode=max
 
+      - name: Retag existing Nginx image (no nginx-affecting changes)
+        if: steps.nginx-filter.outputs.nginx != 'true'
+        run: |
+          docker buildx imagetools create \
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }} \
+            --tag ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
+
       - name: Scan PHP image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/${{ inputs.php-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
+          severity: CRITICAL
+          exit-code: 1
+          format: table
+
+      - name: Scan Nginx image for vulnerabilities
+        if: steps.nginx-filter.outputs.nginx == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
           severity: CRITICAL
           exit-code: 1
           format: table
