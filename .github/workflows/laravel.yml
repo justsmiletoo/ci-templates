@@ -243,28 +243,26 @@ jobs:
           dockerfile: docker/nginx/Dockerfile
           failure-threshold: error
 
-      # Detect nginx-affecting changes. Safe to skip nginx rebuild because Vite assets
-      # are now shared via the `app-build` runtime volume (decoupled from nginx image).
-      # public/build/ is gitignored, so a public/** match never includes Vite output.
-      - name: Detect nginx-affecting changes
-        id: nginx-filter
-        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
-        with:
-          filters: |
-            nginx:
-              - 'docker/nginx/**'
-              - 'public/**'
+      # Content-addressed nginx build cache: hash everything that ends up in the nginx image
+      # (Dockerfile, default.conf, snippets, public/* sans build/). If a `:hash-<h>` tag exists
+      # on GHCR for that exact content, we already built this nginx — just retag rolling.
+      # Otherwise rebuild. Drift impossible by construction (cancelled CI, deleted tag, etc.).
+      - name: Compute nginx content hash
+        id: nginx-hash
+        run: |
+          HASH=$(find docker/nginx public -type f -not -path 'public/build/*' 2>/dev/null \
+            | LC_ALL=C sort \
+            | xargs sha256sum \
+            | sha256sum \
+            | cut -c1-12)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "nginx content hash: $HASH"
 
-      # Self-healing: if the path-filter says "skip nginx", we still need the SHA-suffixed
-      # tag to exist on GHCR for the retag step (and downstream deploy) to succeed.
-      # When a previous nginx build was cancelled/failed/never ran (rolling tag stale or absent),
-      # we MUST rebuild — otherwise the stack would deploy with an out-of-date nginx image
-      # (e.g. missing /healthz route after a config change). Detect this here.
-      - name: Check if nginx rolling tag exists on GHCR
+      - name: Check if nginx image for this content hash exists
         id: nginx-exists
         run: |
           if docker manifest inspect \
-               ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }} \
+               ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:hash-${{ steps.nginx-hash.outputs.hash }} \
                >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
@@ -293,10 +291,11 @@ jobs:
           cache-from: type=gha,scope=${{ inputs.php-image }}-${{ env.IMAGE_TAG }}
           cache-to: type=gha,scope=${{ inputs.php-image }}-${{ env.IMAGE_TAG }},mode=max
 
-      # Build nginx when EITHER: nginx-affecting files changed, OR the rolling tag is missing
-      # on GHCR (first deploy, prior cancelled build, manual deletion → self-heal).
+      # Build nginx only when no image for this content hash exists yet.
+      # Tags pushed: rolling (:prod / :staging), SHA-suffixed (immutable per commit),
+      # and hash-suffixed (immutable per content — what the next CI run will look up).
       - name: Build and push Nginx image
-        if: steps.nginx-filter.outputs.nginx == 'true' || steps.nginx-exists.outputs.exists == 'false'
+        if: steps.nginx-exists.outputs.exists == 'false'
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
@@ -305,15 +304,17 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}
             ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:hash-${{ steps.nginx-hash.outputs.hash }}
           cache-from: type=gha,scope=${{ inputs.nginx-image }}-${{ env.IMAGE_TAG }}
           cache-to: type=gha,scope=${{ inputs.nginx-image }}-${{ env.IMAGE_TAG }},mode=max
 
-      # Retag only when we skipped the build AND the rolling tag actually exists.
-      - name: Retag existing Nginx image (no rebuild needed)
-        if: steps.nginx-filter.outputs.nginx != 'true' && steps.nginx-exists.outputs.exists == 'true'
+      # Content unchanged: retag the existing hash-pinned image as rolling + SHA-suffixed.
+      - name: Retag existing Nginx image (content unchanged)
+        if: steps.nginx-exists.outputs.exists == 'true'
         run: |
           docker buildx imagetools create \
-            ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }} \
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:hash-${{ steps.nginx-hash.outputs.hash }} \
+            --tag ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }} \
             --tag ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
 
       - name: Scan PHP image for vulnerabilities
@@ -324,8 +325,8 @@ jobs:
           exit-code: 1
           format: table
 
+      # Always scan: the SHA-tagged nginx image is now guaranteed to point at the deployed content.
       - name: Scan Nginx image for vulnerabilities
-        if: steps.nginx-filter.outputs.nginx == 'true' || steps.nginx-exists.outputs.exists == 'false'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/${{ inputs.nginx-image }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
