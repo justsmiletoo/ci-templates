@@ -81,9 +81,8 @@ jobs:
 
       - name: Setup pnpm
         if: ${{ inputs.package-manager == 'pnpm' }}
+        # Version read from the project's "packageManager" field (corepack standard)
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
-        with:
-          version: 9
 
       - name: Setup bun
         if: ${{ inputs.package-manager == 'bun' }}
@@ -127,9 +126,8 @@ jobs:
 
       - name: Setup pnpm
         if: ${{ inputs.package-manager == 'pnpm' }}
+        # Version read from the project's "packageManager" field (corepack standard)
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
-        with:
-          version: 9
 
       - name: Setup bun
         if: ${{ inputs.package-manager == 'bun' }}
@@ -173,9 +171,8 @@ jobs:
 
       - name: Setup pnpm
         if: ${{ inputs.package-manager == 'pnpm' }}
+        # Version read from the project's "packageManager" field (corepack standard)
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
-        with:
-          version: 9
 
       - name: Setup bun
         if: ${{ inputs.package-manager == 'bun' }}
