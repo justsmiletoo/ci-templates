@@ -232,16 +232,26 @@ jobs:
           fi
 
       - name: Lint PHP Dockerfile
-        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
-        with:
-          dockerfile: docker/php/Dockerfile
-          failure-threshold: error
+        env:
+          HADOLINT_VERSION: v2.14.0
+        run: |
+          if [ ! -x /tmp/hadolint ]; then
+            curl -fsSL -o /tmp/hadolint \
+              "https://github.com/hadolint/hadolint/releases/download/${{ env.HADOLINT_VERSION }}/hadolint-Linux-x86_64"
+            chmod +x /tmp/hadolint
+          fi
+          /tmp/hadolint --failure-threshold error docker/php/Dockerfile
 
       - name: Lint Nginx Dockerfile
-        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
-        with:
-          dockerfile: docker/nginx/Dockerfile
-          failure-threshold: error
+        env:
+          HADOLINT_VERSION: v2.14.0
+        run: |
+          if [ ! -x /tmp/hadolint ]; then
+            curl -fsSL -o /tmp/hadolint \
+              "https://github.com/hadolint/hadolint/releases/download/${{ env.HADOLINT_VERSION }}/hadolint-Linux-x86_64"
+            chmod +x /tmp/hadolint
+          fi
+          /tmp/hadolint --failure-threshold error docker/nginx/Dockerfile
 
       # Content-addressed nginx build cache: hash everything that ends up in the nginx image
       # (Dockerfile, default.conf, snippets, public/* sans build/). If a `:hash-<h>` tag exists

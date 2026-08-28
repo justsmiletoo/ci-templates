@@ -263,10 +263,15 @@ jobs:
           rm /tmp/.env
 
       - name: Lint Dockerfile
-        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
-        with:
-          dockerfile: docker/Dockerfile
-          failure-threshold: error
+        env:
+          HADOLINT_VERSION: v2.14.0
+        run: |
+          if [ ! -x /tmp/hadolint ]; then
+            curl -fsSL -o /tmp/hadolint \
+              "https://github.com/hadolint/hadolint/releases/download/${{ env.HADOLINT_VERSION }}/hadolint-Linux-x86_64"
+            chmod +x /tmp/hadolint
+          fi
+          /tmp/hadolint --failure-threshold error docker/Dockerfile
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
