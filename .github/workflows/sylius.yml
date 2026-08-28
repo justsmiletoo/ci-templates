@@ -169,24 +169,30 @@ jobs:
       - name: Lint PHP Dockerfile
         env:
           HADOLINT_VERSION: v2.14.0
+          HADOLINT_SHA256: 6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47
         run: |
-          if [ ! -x /tmp/hadolint ]; then
+          if ! command -v hadolint >/dev/null; then
             curl -fsSL -o /tmp/hadolint \
-              "https://github.com/hadolint/hadolint/releases/download/${{ env.HADOLINT_VERSION }}/hadolint-Linux-x86_64"
+              "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64"
+            echo "${HADOLINT_SHA256}  /tmp/hadolint" | sha256sum -c -
             chmod +x /tmp/hadolint
+            install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
           fi
-          /tmp/hadolint --failure-threshold error docker/php/Dockerfile
+          hadolint --failure-threshold error docker/php/Dockerfile
 
       - name: Lint Nginx Dockerfile
         env:
           HADOLINT_VERSION: v2.14.0
+          HADOLINT_SHA256: 6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47
         run: |
-          if [ ! -x /tmp/hadolint ]; then
+          if ! command -v hadolint >/dev/null; then
             curl -fsSL -o /tmp/hadolint \
-              "https://github.com/hadolint/hadolint/releases/download/${{ env.HADOLINT_VERSION }}/hadolint-Linux-x86_64"
+              "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64"
+            echo "${HADOLINT_SHA256}  /tmp/hadolint" | sha256sum -c -
             chmod +x /tmp/hadolint
+            install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
           fi
-          /tmp/hadolint --failure-threshold error docker/nginx/Dockerfile
+          hadolint --failure-threshold error docker/nginx/Dockerfile
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
