@@ -102,11 +102,13 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - name: Install PHP dependencies
-        run: composer install --no-scripts --prefer-dist
+        # The token keeps the API route available, and a failed archive
+        # download falls back to cloning the sources: slower, but the
+        # pipeline survives a broken codeload.
+        run: |
+          composer install --no-scripts --prefer-dist \
+            || composer install --no-scripts --prefer-source
         env:
-          # Authenticated downloads go through api.github.com; without a token
-          # Composer falls back to the codeload legacy.zip route, which GitHub
-          # answers with a 400.
           COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
 
       - name: Install Node dependencies
@@ -137,7 +139,9 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
-        run: composer install --no-scripts --prefer-dist
+        run: |
+          composer install --no-scripts --prefer-dist \
+            || composer install --no-scripts --prefer-source
         env:
           COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
 
@@ -163,11 +167,10 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - name: Install PHP dependencies
-        run: composer install --no-scripts --prefer-dist
+        run: |
+          composer install --no-scripts --prefer-dist \
+            || composer install --no-scripts --prefer-source
         env:
-          # Authenticated downloads go through api.github.com; without a token
-          # Composer falls back to the codeload legacy.zip route, which GitHub
-          # answers with a 400.
           COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
 
       - name: Install Node dependencies
