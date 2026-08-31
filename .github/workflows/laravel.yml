@@ -103,6 +103,11 @@ jobs:
 
       - name: Install PHP dependencies
         run: composer install --no-scripts --prefer-dist
+        env:
+          # Authenticated downloads go through api.github.com; without a token
+          # Composer falls back to the codeload legacy.zip route, which GitHub
+          # answers with a 400.
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
 
       - name: Install Node dependencies
         if: ${{ inputs.has-node }}
@@ -133,6 +138,8 @@ jobs:
 
       - name: Install dependencies
         run: composer install --no-scripts --prefer-dist
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
 
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse --error-format=github
@@ -157,6 +164,11 @@ jobs:
 
       - name: Install PHP dependencies
         run: composer install --no-scripts --prefer-dist
+        env:
+          # Authenticated downloads go through api.github.com; without a token
+          # Composer falls back to the codeload legacy.zip route, which GitHub
+          # answers with a 400.
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
 
       - name: Install Node dependencies
         if: ${{ inputs.has-node }}
