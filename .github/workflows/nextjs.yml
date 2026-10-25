@@ -255,11 +255,17 @@ jobs:
       - name: Extract NEXT_PUBLIC vars from env secret
         run: |
           echo '${{ secrets.ENV_FILE_BASE64 }}' | base64 -d > /tmp/.env
-          while IFS= read -r line; do
-            if [[ "$line" =~ ^NEXT_PUBLIC_ ]]; then
-              echo "$line" >> $GITHUB_ENV
-            fi
-          done < /tmp/.env
+          # Every NEXT_PUBLIC_* line becomes a build arg: a Dockerfile picks
+          # the ones it declares, the others are ignored.
+          {
+            echo "NEXT_BUILD_ARGS<<NEXT_BUILD_ARGS_EOF"
+            while IFS= read -r line || [[ -n "$line" ]]; do
+              if [[ "$line" =~ ^NEXT_PUBLIC_[A-Z0-9_]+= ]]; then
+                echo "$line"
+              fi
+            done < /tmp/.env
+            echo "NEXT_BUILD_ARGS_EOF"
+          } >> $GITHUB_ENV
           rm /tmp/.env
 
       - name: Lint Dockerfile
@@ -295,8 +301,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}
             ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ env.NEXT_PUBLIC_API_URL }}
+          build-args: ${{ env.NEXT_BUILD_ARGS }}
           cache-from: type=gha,scope=${{ inputs.image-name }}-${{ env.IMAGE_TAG }}
           cache-to: type=gha,scope=${{ inputs.image-name }}-${{ env.IMAGE_TAG }},mode=max
 
