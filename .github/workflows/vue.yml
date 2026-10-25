@@ -229,6 +229,9 @@ jobs:
         github.ref_name == inputs.main-branch ||
         (inputs.staging-branch != '' && github.ref_name == inputs.staging-branch)
       )
+    # VITE_* are written into the bundle at build time, from the env secret,
+    # which lives in the environment: without it the secret is empty.
+    environment: ${{ github.ref_name == inputs.main-branch && 'production' || 'staging' }}
     permissions:
       contents: read
       packages: write
