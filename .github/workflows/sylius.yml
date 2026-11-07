@@ -1,3 +1,10 @@
+# Caller permissions: the jobs below take the GITHUB_TOKEN rights of the
+# calling workflow and never ask for more themselves, so a run started by
+# github-actions[bot] (the release-please pull request) is not refused. The
+# caller declares, at its top level:
+#   packages: write                         always (the build pushes the image)
+#   contents: write + pull-requests: write  with has-release-please: true
+
 name: Sylius CI/CD
 
 on:
@@ -151,9 +158,6 @@ jobs:
           (inputs.staging-branch == '' && github.ref_name == inputs.main-branch && needs.release-please.outputs.release_created == 'true')
         ))
       )
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
