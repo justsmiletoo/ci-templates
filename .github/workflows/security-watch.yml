@@ -34,22 +34,35 @@ concurrency:
 
 env:
   SEVERITY: MEDIUM,HIGH,CRITICAL
+  # The official image, pinned by digest: no install script fetched from GitHub releases.
+  TRIVY_IMAGE: aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
 
 jobs:
   # ── Vulnerability database, downloaded once for every scan ──
   trivy-db:
     name: Trivy database
     runs-on: ${{ vars.SECURITY_WATCH_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      key: ${{ steps.key.outputs.key }}
     steps:
-      - name: Download the database into the cache
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+      - id: key
+        run: echo "key=trivy-db-$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - id: cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln
-          format: table
+          path: ${{ runner.temp }}/trivy
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Download the database
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          for attempt in 1 2 3; do
+            docker run --rm -v "$RUNNER_TEMP/trivy:/cache" "$TRIVY_IMAGE" image --quiet --cache-dir /cache --download-db-only \
+              --db-repository mirror.gcr.io/aquasec/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2 && exit 0
+            echo "attempt $attempt failed, retrying"; sleep 30
+          done
+          exit 1
 
   # ── Dependencies of each application, on the branch it deploys ──
   dependencies:
@@ -85,6 +98,12 @@ jobs:
           persist-credentials: false
           path: app
 
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ runner.temp }}/trivy
+          key: ${{ needs.trivy-db.outputs.key }}
+          fail-on-cache-miss: true
+
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
         if: ${{ matrix.php }}
         with:
@@ -110,23 +129,10 @@ jobs:
 
       - name: Scan the JavaScript lockfiles
         if: ${{ matrix.js }}
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_SKIP_DB_UPDATE: "true"
-          TRIVY_SKIP_JAVA_DB_UPDATE: "true"
-        with:
-          scan-type: fs
-          scan-ref: app
-          scanners: vuln
-          skip-files: "**/composer.lock"
-          ignore-unfixed: true
-          severity: ${{ env.SEVERITY }}
-          format: json
-          output: trivy.json
-
-      - name: Keep the findings
-        if: ${{ matrix.js }}
         run: |
+          docker run --rm -v "$PWD:/work" -w /work -v "$RUNNER_TEMP/trivy:/cache" "$TRIVY_IMAGE" fs app \
+            --cache-dir /cache --skip-db-update --quiet --scanners vuln --skip-files '**/composer.lock' \
+            --ignore-unfixed --severity "$SEVERITY" --format json --output trivy.json
           jq -r '.Results[]? | .Vulnerabilities[]?
             | ["npm", .PkgName, .InstalledVersion, (.FixedVersion // ""), .Severity, .VulnerabilityID,
                ((.Title // .Description // "") | .[0:140]), (.PrimaryURL // "")]
@@ -193,18 +199,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.SECURITY_WATCH_PACKAGES_TOKEN }}
 
-      - name: Scan the image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_SKIP_DB_UPDATE: "true"
-          TRIVY_SKIP_JAVA_DB_UPDATE: "true"
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          image-ref: ${{ matrix.image }}
-          scanners: vuln
-          ignore-unfixed: true
-          severity: ${{ env.SEVERITY }}
-          format: json
-          output: trivy.json
+          path: ${{ runner.temp }}/trivy
+          key: ${{ needs.trivy-db.outputs.key }}
+          fail-on-cache-miss: true
+
+      - name: Scan the image
+        run: |
+          auth=()
+          if [ -f "$HOME/.docker/config.json" ]; then auth=(-v "$HOME/.docker/config.json:/root/.docker/config.json:ro"); fi
+          docker run --rm -v "$PWD:/work" -w /work -v "$RUNNER_TEMP/trivy:/cache" "${auth[@]}" "$TRIVY_IMAGE" image "$TARGET" \
+            --cache-dir /cache --skip-db-update --quiet --scanners vuln \
+            --ignore-unfixed --severity "$SEVERITY" --format json --output trivy.json
 
       - name: Upload the findings
         id: findings
