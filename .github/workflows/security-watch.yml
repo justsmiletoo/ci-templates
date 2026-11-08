@@ -1,0 +1,274 @@
+# Weekly security watch of everything the VPS runs.
+#
+#   Dependencies  composer audit (Packagist advisories, which list the Symfony
+#                 ones GitHub's database misses) on composer.lock, Trivy on the
+#                 JavaScript lockfiles (pnpm, npm, yarn, bun), runtime only.
+#   Images        Trivy on every image the stacks run: system packages and the
+#                 dependencies bundled in the image.
+#
+# Only vulnerabilities that have a fix, of medium severity or above, are kept.
+# One report lands in the run summary; while one is left the run fails, so
+# GitHub mails the person who last changed the schedule below.
+#
+# Repository secrets (read-only tokens):
+#   SECURITY_WATCH_REPOS_TOKEN     fine-grained token, Contents: read on the repositories below
+#   SECURITY_WATCH_PACKAGES_TOKEN  classic token, read:packages only (private GHCR images)
+# Repository variable, optional:
+#   SECURITY_WATCH_RUNNER          "self-hosted" to run on kvm4 instead of GitHub's minutes
+#
+# A new application deployed on the VPS gets its line in both matrices.
+
+name: Security watch
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-watch
+  cancel-in-progress: true
+
+env:
+  SEVERITY: MEDIUM,HIGH,CRITICAL
+
+jobs:
+  # ── Vulnerability database, downloaded once for every scan ──
+  trivy-db:
+    name: Trivy database
+    runs-on: ${{ vars.SECURITY_WATCH_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Download the database into the cache
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: table
+
+  # ── Dependencies of each application, on the branch it deploys ──
+  dependencies:
+    name: Dependencies ${{ matrix.repo }}
+    needs: [trivy-db]
+    runs-on: ${{ vars.SECURITY_WATCH_RUNNER || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { repo: school-management-back, ref: master, php: true, js: false }
+          - { repo: school-management-front, ref: master, php: false, js: true }
+          - { repo: ecolelacolombe-site, ref: master, php: false, js: true }
+          - { repo: iqraback, ref: main, php: true, js: false }
+          - { repo: iqrafront, ref: main, php: false, js: true }
+          - { repo: greenhealthnature-sylius, ref: master, php: true, js: true }
+          - { repo: greenhealthnature-front, ref: master, php: false, js: true }
+          - { repo: etoile-elegante-sylius, ref: master, php: true, js: true }
+          - { repo: etoile-elegante-front, ref: master, php: false, js: true }
+          - { repo: sointim, ref: master, php: true, js: true }
+          - { repo: cfolco, ref: re7, php: true, js: true }
+          - { repo: sididev.com, ref: master, php: true, js: true }
+          - { repo: bintoufaneportfolio, ref: master, php: true, js: true }
+    env:
+      TARGET: ${{ matrix.repo }}
+      FINDINGS: findings.tsv
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          token: ${{ secrets.SECURITY_WATCH_REPOS_TOKEN }}
+          persist-credentials: false
+          path: app
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        if: ${{ matrix.php }}
+        with:
+          php-version: "8.3"
+          tools: composer:v2
+          coverage: none
+
+      - name: Audit composer.lock
+        if: ${{ matrix.php }}
+        working-directory: app
+        run: |
+          composer audit --locked --no-dev --no-plugins --abandoned=ignore --format=json > ../composer-audit.json || true
+          jq -r --slurpfile lock composer.lock '
+            def ver: ltrimstr("v") | split("-")[0] | split(".") | map(tonumber? // 0);
+            ($lock[0].packages | map({(.name): .version}) | add) as $installed
+            | .advisories | to_entries[] | .value[]
+            | ($installed[.packageName] // "?") as $version
+            | ([.affectedVersions | split("|")[] | (capture("<(?<bound>[0-9][0-9.]*)$")? | .bound)]
+               | map(select(ver > ($version | ver))) | min_by(ver) // "?") as $fixed
+            | ["composer", .packageName, $version, $fixed,
+               ((.severity // "unknown") | ascii_upcase), (.cve // .advisoryId), .title, (.link // "")]
+            | @tsv' ../composer-audit.json >> "../$FINDINGS"
+
+      - name: Scan the JavaScript lockfiles
+        if: ${{ matrix.js }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_SKIP_DB_UPDATE: "true"
+          TRIVY_SKIP_JAVA_DB_UPDATE: "true"
+        with:
+          scan-type: fs
+          scan-ref: app
+          scanners: vuln
+          skip-files: "**/composer.lock"
+          ignore-unfixed: true
+          severity: ${{ env.SEVERITY }}
+          format: json
+          output: trivy.json
+
+      - name: Keep the findings
+        if: ${{ matrix.js }}
+        run: |
+          jq -r '.Results[]? | .Vulnerabilities[]?
+            | ["npm", .PkgName, .InstalledVersion, (.FixedVersion // ""), .Severity, .VulnerabilityID,
+               ((.Title // .Description // "") | .[0:140]), (.PrimaryURL // "")]
+            | @tsv' trivy.json >> "$FINDINGS"
+
+      - name: Upload the findings
+        run: |
+          touch "$FINDINGS"
+          mkdir -p out && sed "s/^/$TARGET\t/" "$FINDINGS" > "out/deps-$TARGET.tsv"
+          echo "$(wc -l < "out/deps-$TARGET.tsv") finding(s) in $TARGET"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: findings-deps-${{ matrix.repo }}
+          path: out/
+          retention-days: 30
+
+  # ── Images the stacks run ───────────────────────────────
+  images:
+    name: Image ${{ matrix.image }}
+    needs: [trivy-db]
+    runs-on: ${{ vars.SECURITY_WATCH_RUNNER || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ghcr.io/justsmiletoo/school-management-back-php:prod
+          - ghcr.io/justsmiletoo/school-management-back-nginx:prod
+          - ghcr.io/justsmiletoo/school-management-front:prod
+          - ghcr.io/justsmiletoo/ecolelacolombe-site:prod
+          - ghcr.io/justsmiletoo/iqraback-php:prod
+          - ghcr.io/justsmiletoo/iqraback-nginx:prod
+          - ghcr.io/justsmiletoo/qiraon-front:prod
+          - ghcr.io/justsmiletoo/greenhealthnature-php:prod
+          - ghcr.io/justsmiletoo/greenhealthnature-nginx:prod
+          - ghcr.io/justsmiletoo/greenhealthnature-front:prod
+          - ghcr.io/justsmiletoo/etoile-sylius-php:prod
+          - ghcr.io/justsmiletoo/etoile-sylius-nginx:prod
+          - ghcr.io/justsmiletoo/etoile-elegante-front:prod
+          - ghcr.io/justsmiletoo/sointim-php:prod
+          - ghcr.io/justsmiletoo/sointim-nginx:prod
+          - ghcr.io/justsmiletoo/cfolco-php:staging
+          - ghcr.io/justsmiletoo/cfolco-nginx:staging
+          - ghcr.io/justsmiletoo/sididev-php:prod
+          - ghcr.io/justsmiletoo/sididev-nginx:prod
+          - ghcr.io/justsmiletoo/bintoufane-portfolio-php:prod
+          - ghcr.io/justsmiletoo/bintoufane-portfolio-nginx:prod
+          - ghcr.io/justsmiletoo/vps-maintenance-toolbox:prod
+          - traefik:v3.6.10
+          - mysql:8.0
+          - mysql:8.4
+          - postgres:16-alpine
+          - ghcr.io/umami-software/umami:postgresql-latest
+          - maildev/maildev:2.2.1
+          - grafana/grafana:12.0.1
+          - portainer/portainer-ce:2.27.3
+          - louislam/uptime-kuma:1.23.16
+    env:
+      TARGET: ${{ matrix.image }}
+    steps:
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        if: ${{ startsWith(matrix.image, 'ghcr.io/justsmiletoo/') }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.SECURITY_WATCH_PACKAGES_TOKEN }}
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_SKIP_DB_UPDATE: "true"
+          TRIVY_SKIP_JAVA_DB_UPDATE: "true"
+        with:
+          image-ref: ${{ matrix.image }}
+          scanners: vuln
+          ignore-unfixed: true
+          severity: ${{ env.SEVERITY }}
+          format: json
+          output: trivy.json
+
+      - name: Upload the findings
+        id: findings
+        run: |
+          mkdir -p out
+          name=$(echo "$TARGET" | tr '/:@' '___')
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          jq -r --arg target "$TARGET" '.Results[]? | .Type as $type | .Vulnerabilities[]?
+            | [$target, $type, .PkgName, .InstalledVersion, (.FixedVersion // ""), .Severity, .VulnerabilityID,
+               ((.Title // .Description // "") | .[0:140]), (.PrimaryURL // "")]
+            | @tsv' trivy.json > "out/image-$name.tsv"
+          echo "$(wc -l < "out/image-$name.tsv") finding(s) in $TARGET"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: findings-image-${{ steps.findings.outputs.name }}
+          path: out/
+          retention-days: 30
+
+  # ── One report for everything ───────────────────────────
+  report:
+    name: Report
+    needs: [dependencies, images]
+    if: ${{ always() && needs.dependencies.result != 'skipped' }}
+    runs-on: ${{ vars.SECURITY_WATCH_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: findings-*
+          merge-multiple: true
+          path: findings
+
+      - name: Write the report
+        env:
+          SCANS_FAILED: ${{ needs.dependencies.result == 'failure' || needs.images.result == 'failure' }}
+        run: |
+          shopt -s nullglob
+          cat findings/*.tsv 2>/dev/null | sed 's/|/\//g' | sort -u > all.tsv
+          total=$(wc -l < all.tsv)
+          {
+            echo "# Security watch, $(date -u +%Y-%m-%d)"
+            echo
+            echo "Fixable vulnerabilities, medium severity and above."
+            echo
+            if [ "$total" -eq 0 ]; then
+              echo "Nothing to fix."
+            else
+              echo "| Target | Critical | High | Medium | Other | Total |"
+              echo "|---|---:|---:|---:|---:|---:|"
+              awk -F'\t' '{t=$1; s=$6; n[t]++; c[t,s]++} END {for (t in n) printf "| %s | %d | %d | %d | %d | %d |\n", t, c[t,"CRITICAL"], c[t,"HIGH"], c[t,"MEDIUM"], n[t]-c[t,"CRITICAL"]-c[t,"HIGH"]-c[t,"MEDIUM"], n[t]}' all.tsv | sort -t'|' -k7,7nr -k3,3nr
+              echo
+              cut -f1 all.tsv | sort -u | while read -r target; do
+                echo "<details><summary><b>$target</b></summary>"
+                echo
+                echo "| Source | Package | Installed | Fixed in | Severity | Advisory |"
+                echo "|---|---|---|---|---|---|"
+                awk -F'\t' -v t="$target" '$1 == t {printf "| %s | %s | %s | %s | %s | [%s](%s) %s |\n", $2, $3, $4, $5, $6, $7, $9, $8}' all.tsv
+                echo
+                echo "</details>"
+              done
+            fi
+            if [ "$SCANS_FAILED" = "true" ]; then
+              echo
+              echo "Some scans did not finish: the failed jobs above are missing from this report."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$total fixable vulnerabilities"
+          if [ "$total" -gt 0 ] || [ "$SCANS_FAILED" = "true" ]; then exit 1; fi
